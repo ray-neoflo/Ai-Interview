@@ -12,6 +12,15 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+// Turn a role name into a stable, URL-safe document id.
+// e.g. "SDE2 (Frontend)" → "sde2-frontend"
+function slugify(s) {
+  return String(s || "").toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "role";
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -61,11 +70,70 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
+    // ── Roles ────────────────────────────────────────────────────
+    if (action === "getRoles") {
+      const snap  = await db.collection("roles").get();
+      const roles = snap.docs.map(d => {
+        const data = d.data() || {};
+        return {
+          id:        d.id,
+          name:      data.name || d.id,
+          questions: Array.isArray(data.questions) ? data.questions : [],
+          updatedAt: data.updatedAt || null,
+        };
+      });
+      roles.sort((a, b) => a.name.localeCompare(b.name));
+      return res.status(200).json({ success: true, roles });
+    }
+
+    // Create a new role, or update an existing one (name + questions).
+    if (action === "saveRole") {
+      const { id, name, questions } = rest;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "role name is required" });
+      }
+      const cleaned = Array.isArray(questions)
+        ? questions.map(q => String(q).trim()).filter(Boolean)
+        : [];
+
+      // Existing role → update in place (id stays stable even if renamed).
+      if (id) {
+        await db.collection("roles").doc(id).set({
+          name:      String(name).trim(),
+          questions: cleaned,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        return res.status(200).json({ success: true, id });
+      }
+
+      // New role → derive id from the name, reject duplicates.
+      const newId = slugify(name);
+      const ref   = db.collection("roles").doc(newId);
+      const snap  = await ref.get();
+      if (snap.exists) {
+        return res.status(200).json({ success: false, error: "role_exists" });
+      }
+      await ref.set({
+        name:      String(name).trim(),
+        questions: cleaned,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      return res.status(200).json({ success: true, id: newId });
+    }
+
+    if (action === "deleteRole") {
+      const { id } = rest;
+      if (!id) return res.status(400).json({ error: "role id required" });
+      await db.collection("roles").doc(id).delete();
+      return res.status(200).json({ success: true });
+    }
+
     // ── Add candidate ────────────────────────────────────────────
     if (action === "addCandidate") {
       // Note: `password` is consumed above as the admin password, so
       // the candidate's password comes in as `candidatePassword`
-      const { name, email, candidatePassword, winStart, winEnd } = rest;
+      const { name, email, candidatePassword, winStart, winEnd, role, roleName } = rest;
       if (!name || !email || !candidatePassword) {
         return res.status(400).json({ error: "name, email and candidatePassword are required" });
       }
@@ -80,23 +148,28 @@ module.exports = async function handler(req, res) {
         Email:          email.trim().toLowerCase(),
         Password:       candidatePassword,
         Status:         "",
+        Role:           role     || "",
+        RoleName:       roleName || "",
         InterviewStart: winStart || null,
         InterviewEnd:   winEnd   || null,
       });
       return res.status(200).json({ success: true });
     }
 
-    // ── Edit candidate (slot + status) ──────────────────────────
+    // ── Edit candidate (slot + status + role) ────────────────────
     if (action === "editCandidate") {
-      const { email, status, winStart, winEnd } = rest;
+      const { email, status, winStart, winEnd, role, roleName } = rest;
       if (!email) return res.status(400).json({ error: "email required" });
       const docId = email.trim().toLowerCase();
       // Use set+merge so it works even if field names shift; never throws NOT_FOUND
-      await db.collection("candidates").doc(docId).set({
+      const update = {
         Status:         status || "",
         InterviewStart: winStart !== undefined ? (winStart || null) : null,
         InterviewEnd:   winEnd   !== undefined ? (winEnd   || null) : null,
-      }, { merge: true });
+      };
+      if (role     !== undefined) update.Role     = role     || "";
+      if (roleName !== undefined) update.RoleName = roleName || "";
+      await db.collection("candidates").doc(docId).set(update, { merge: true });
       return res.status(200).json({ success: true });
     }
 

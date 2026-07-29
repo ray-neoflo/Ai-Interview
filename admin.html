@@ -499,6 +499,30 @@
     .save-bar { right: 16px; bottom: 16px; }
     .edit-grid { grid-template-columns: 1fr; }
   }
+
+  /* ── Roles ──────────────────────────────────────────────── */
+  .roles-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; flex-wrap:wrap; }
+  .role-chips { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:22px; }
+  .role-chip {
+    display:inline-flex; align-items:center; gap:8px; padding:8px 14px;
+    border:1px solid rgba(0,0,0,0.12); border-radius:9px; background:var(--card, #fff);
+    cursor:pointer; font-size:13px; font-weight:600; color:var(--text);
+    transition:all 0.18s;
+  }
+  .role-chip:hover { border-color: rgba(0,0,0,0.3); transform: translateY(-1px); }
+  .role-chip.active { background: var(--accent); color:#fff; border-color: var(--accent); }
+  .role-chip .role-chip-count {
+    font-size:11px; font-weight:600; padding:1px 7px; border-radius:20px;
+    background: rgba(0,0,0,0.06); color: var(--muted);
+  }
+  .role-chip.active .role-chip-count { background: rgba(255,255,255,0.25); color:#fff; }
+  .roles-empty { color:var(--muted); font-size:14px; padding:18px 0; }
+  .role-editor-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; flex-wrap:wrap; }
+  .role-editor-title { font-size:16px; font-weight:700; color:var(--text); }
+  .role-name-input {
+    font-size:14px; padding:9px 12px; border:1px solid rgba(0,0,0,0.14);
+    border-radius:8px; width:260px; max-width:100%; color:var(--text); background:var(--card,#fff);
+  }
 </style>
 </head>
 <body>
@@ -559,9 +583,13 @@
         <span class="nav-label">Candidates</span>
         <span class="nav-badge" id="nav-badge">0</span>
       </button>
+      <button class="nav-item" id="nav-roles" onclick="switchTab('roles')">
+        <span class="nav-icon">🎯</span>
+        <span class="nav-label">Roles</span>
+      </button>
       <button class="nav-item" id="nav-questions" onclick="switchTab('questions')">
         <span class="nav-icon">❓</span>
-        <span class="nav-label">Questions</span>
+        <span class="nav-label">Default Questions</span>
       </button>
     </div>
 
@@ -616,6 +644,7 @@
                 <th></th>
                 <th>Name</th>
                 <th>Email</th>
+                <th>Role</th>
                 <th>Status</th>
                 <th>Score</th>
                 <th>Login Window</th>
@@ -628,10 +657,50 @@
         </div>
       </div>
 
+      <!-- Roles Page -->
+      <div class="page" id="page-roles">
+        <div class="page-title">Roles &amp; Questionnaires</div>
+        <div class="page-sub">Create roles and manage a separate set of interview questions for each one.</div>
+
+        <div id="roles-loading" class="loading">
+          <div class="spin"></div> Loading roles…
+        </div>
+
+        <div id="roles-body" style="display:none">
+          <div class="roles-bar">
+            <div style="font-size:13px;color:var(--muted)">Select a role to edit its questions.</div>
+            <button class="btn btn-primary" onclick="openAddRoleModal()">＋ Add Role</button>
+          </div>
+
+          <div id="role-chips" class="role-chips"></div>
+          <div id="roles-empty" class="roles-empty" style="display:none">
+            No roles yet. Click <strong>+ Add Role</strong> to create your first one.
+          </div>
+
+          <div id="role-editor" style="display:none">
+            <div class="role-editor-head">
+              <input type="text" id="role-name-input" class="role-name-input"
+                placeholder="Role name" oninput="onRoleNameChange()">
+              <div style="display:flex;gap:8px;align-items:center">
+                <span class="edit-msg" id="role-save-msg"></span>
+                <button class="btn btn-primary" id="btn-role-save" onclick="saveActiveRole()">Save Role</button>
+                <button class="btn btn-outline" onclick="deleteActiveRole()"
+                  style="color:var(--danger);border-color:rgba(239,68,68,0.35)">🗑 Delete Role</button>
+              </div>
+            </div>
+            <div class="page-sub" style="margin-bottom:14px">Questions asked to candidates assigned this role.</div>
+            <div class="q-list" id="role-q-list"></div>
+            <button class="add-q-btn" style="margin-top:10px" onclick="addRoleQuestion()">
+              <span style="font-size:18px">+</span> Add Question
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Questions Page -->
       <div class="page" id="page-questions">
-        <div class="page-title">Interview Questions</div>
-        <div class="page-sub">Changes apply to all future interviews immediately.</div>
+        <div class="page-title">Default Questions</div>
+        <div class="page-sub">Fallback questionnaire used for candidates with no role assigned. Role-specific questions are managed under <strong>Roles</strong>.</div>
 
         <div id="questions-loading" class="loading">
           <div class="spin"></div> Loading questions…
@@ -704,6 +773,10 @@
       <label>Password</label>
       <input type="text" id="add-password" placeholder="Set a login password for the candidate" autocomplete="off">
     </div>
+    <div class="modal-field">
+      <label>Role</label>
+      <select id="add-role" class="edit-input"><option value="">— No role (default questions) —</option></select>
+    </div>
 
     <hr class="modal-divider">
     <div class="modal-optional">⏰ Interview Window (optional — leave blank for no restriction)</div>
@@ -722,6 +795,26 @@
     <div class="modal-actions">
       <button class="btn-modal-cancel" onclick="closeAddModal()">Cancel</button>
       <button class="btn-modal-save" id="btn-add-save" onclick="submitAddCandidate()">Add Candidate</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ ADD ROLE MODAL ══════════════════════════════ -->
+<div class="modal-overlay" id="add-role-modal">
+  <div class="modal">
+    <div class="modal-title">🎯 Add Role</div>
+    <div class="modal-sub">Create a role. You can add its interview questions right after.</div>
+
+    <div class="modal-field">
+      <label>Role Name</label>
+      <input type="text" id="add-role-name" placeholder="e.g. SDE2 (Frontend)" autocomplete="off">
+    </div>
+
+    <div id="add-role-error" style="display:none;font-size:13px;color:#dc2626;margin-bottom:14px;padding:10px 14px;background:rgba(239,68,68,0.08);border-radius:8px;border:1px solid rgba(239,68,68,0.2)"></div>
+
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="closeAddRoleModal()">Cancel</button>
+      <button class="btn-modal-save" id="btn-add-role-save" onclick="submitAddRole()">Create Role</button>
     </div>
   </div>
 </div>
@@ -782,6 +875,11 @@ let questions      = [];
 let dirty          = false;
 let selectedEmails = new Set();
 
+// Roles state
+let roles          = [];      // [{ id, name, questions }]
+let activeRoleId   = null;    // id of the role currently open in the editor
+let roleQuestions  = [];      // working copy of the active role's questions
+
 // ═══════════════════════════════════════════════════════════
 //  LOGIN / LOGOUT
 // ═══════════════════════════════════════════════════════════
@@ -809,6 +907,7 @@ async function adminLogin() {
     document.getElementById("login-wrap").style.display = "none";
     document.getElementById("app").classList.add("show");
     loadCandidates();
+    loadRoles();
     questions = res.questions || [];
     renderQuestions();
   } catch (e) {
@@ -928,6 +1027,7 @@ function renderCandidates(list) {
       </td>
       <td><strong>${esc(c.Name || "—")}</strong></td>
       <td style="color:var(--muted);font-size:13px">${esc(email)}</td>
+      <td style="font-size:13px">${c.RoleName ? esc(c.RoleName) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>
         <span class="badge ${interviewed ? "badge-interviewed" : "badge-pending"}">
           ${interviewed ? "Interviewed" : "Pending"}
@@ -944,7 +1044,7 @@ function renderCandidates(list) {
     extr.className = "expand-row";
     extr.id = "exp-" + i;
     extr.innerHTML = `
-      <td colspan="8">
+      <td colspan="9">
         <div class="expand-inner">
 
           <div class="expand-section">
@@ -980,6 +1080,10 @@ function renderCandidates(list) {
                     <option value="" ${!interviewed ? "selected" : ""}>Pending</option>
                     <option value="Interviewed" ${interviewed ? "selected" : ""}>Interviewed</option>
                   </select>
+                </div>
+                <div class="edit-field">
+                  <label>Role</label>
+                  <select id="edit-role-${i}" class="edit-input">${roleOptions(c.Role || "")}</select>
                 </div>
               </div>
               <div class="edit-actions">
@@ -1026,6 +1130,8 @@ async function saveCandidate(i, email) {
   const startVal  = document.getElementById("edit-start-"  + i)?.value || "";
   const endVal    = document.getElementById("edit-end-"    + i)?.value || "";
   const statusVal = document.getElementById("edit-status-" + i)?.value || "";
+  const roleVal   = document.getElementById("edit-role-"   + i)?.value || "";
+  const roleNameVal = (roles.find(r => r.id === roleVal) || {}).name || "";
   const msgEl     = document.getElementById("edit-msg-"    + i);
   const btn       = document.getElementById("edit-btn-"    + i);
 
@@ -1043,6 +1149,8 @@ async function saveCandidate(i, email) {
       action:   "editCandidate",
       email,
       status:   statusVal,
+      role:     roleVal,
+      roleName: roleNameVal,
       winStart: startVal ? new Date(startVal).toISOString() : null,
       winEnd:   endVal   ? new Date(endVal).toISOString()   : null,
     });
@@ -1144,6 +1252,205 @@ async function saveQuestions() {
     showToast("Failed to save. Please try again.", "error");
   } finally {
     btn.disabled = false; btn.textContent = "Save Changes";
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ROLES
+// ═══════════════════════════════════════════════════════════
+// <option> markup for every role, with `selectedId` pre-selected.
+function roleOptions(selectedId) {
+  const opts = ['<option value="">— No role (default questions) —</option>'];
+  roles.forEach(r => {
+    const sel = r.id === selectedId ? " selected" : "";
+    opts.push(`<option value="${esc(r.id)}"${sel}>${esc(r.name)}</option>`);
+  });
+  return opts.join("");
+}
+
+async function loadRoles() {
+  try {
+    const data = await adminApi({ action: "getRoles" });
+    roles = data.roles || [];
+  } catch (e) {
+    roles = [];
+    console.error("[loadRoles]", e);
+  }
+  renderRolesList();
+  populateAddRoleSelect();
+}
+
+function populateAddRoleSelect() {
+  const sel = document.getElementById("add-role");
+  if (sel) sel.innerHTML = roleOptions("");
+}
+
+function renderRolesList() {
+  document.getElementById("roles-loading").style.display = "none";
+  document.getElementById("roles-body").style.display    = "block";
+
+  const wrap  = document.getElementById("role-chips");
+  const empty = document.getElementById("roles-empty");
+  wrap.innerHTML = "";
+
+  if (!roles.length) {
+    empty.style.display = "block";
+    document.getElementById("role-editor").style.display = "none";
+    return;
+  }
+  empty.style.display = "none";
+
+  roles.forEach(r => {
+    const chip = document.createElement("button");
+    chip.className = "role-chip" + (r.id === activeRoleId ? " active" : "");
+    chip.onclick = () => selectRole(r.id);
+    chip.innerHTML = `${esc(r.name)} <span class="role-chip-count">${(r.questions || []).length}</span>`;
+    wrap.appendChild(chip);
+  });
+
+  // Keep the open editor in sync; if the active role vanished, close it.
+  if (activeRoleId && !roles.some(r => r.id === activeRoleId)) {
+    activeRoleId = null;
+    document.getElementById("role-editor").style.display = "none";
+  }
+}
+
+function selectRole(id) {
+  const role = roles.find(r => r.id === id);
+  if (!role) return;
+  activeRoleId  = id;
+  roleQuestions = (role.questions || []).slice();
+  document.getElementById("role-name-input").value = role.name || "";
+  document.getElementById("role-editor").style.display = "block";
+  document.getElementById("role-save-msg").textContent = "";
+  renderRolesList();      // refresh active-chip highlight
+  renderRoleQuestions();
+}
+
+function renderRoleQuestions() {
+  const list = document.getElementById("role-q-list");
+  list.innerHTML = "";
+  roleQuestions.forEach((q, i) => {
+    const item = document.createElement("div");
+    item.className = "q-item";
+    item.innerHTML = `
+      <div class="q-num">${i + 1}</div>
+      <textarea class="q-input" rows="1" placeholder="Enter question…"
+        oninput="onRoleQChange(${i}, this.value); autoResize(this)"
+      >${esc(q)}</textarea>
+      <div class="q-controls">
+        <button class="q-btn" title="Move up"   onclick="moveRoleQ(${i}, -1)" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button class="q-btn" title="Move down" onclick="moveRoleQ(${i},  1)" ${i === roleQuestions.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="q-btn del" title="Delete" onclick="deleteRoleQ(${i})">✕</button>
+      </div>
+    `;
+    list.appendChild(item);
+    const ta = item.querySelector("textarea");
+    setTimeout(() => autoResize(ta), 0);
+  });
+}
+
+function onRoleQChange(i, val) { roleQuestions[i] = val; }
+function onRoleNameChange() { /* name saved on Save Role */ }
+
+function addRoleQuestion() {
+  roleQuestions.push(""); renderRoleQuestions();
+  const items = document.querySelectorAll("#role-q-list .q-input");
+  const last = items[items.length - 1];
+  if (last) { last.focus(); autoResize(last); }
+}
+
+function deleteRoleQ(i) { roleQuestions.splice(i, 1); renderRoleQuestions(); }
+
+function moveRoleQ(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= roleQuestions.length) return;
+  [roleQuestions[i], roleQuestions[j]] = [roleQuestions[j], roleQuestions[i]];
+  renderRoleQuestions();
+}
+
+async function saveActiveRole() {
+  if (!activeRoleId) return;
+  const name    = document.getElementById("role-name-input").value.trim();
+  const msg     = document.getElementById("role-save-msg");
+  const btn     = document.getElementById("btn-role-save");
+  if (!name) { msg.textContent = "⚠ Role name is required."; msg.style.color = "var(--danger)"; return; }
+  const cleaned = roleQuestions.map(q => q.trim()).filter(Boolean);
+
+  btn.disabled = true; btn.textContent = "Saving…";
+  msg.textContent = ""; msg.style.color = "var(--muted)";
+  try {
+    const res = await adminApi({ action: "saveRole", id: activeRoleId, name, questions: cleaned });
+    if (res.success) {
+      showToast("Role saved.", "success");
+      await loadRoles();
+      selectRole(activeRoleId);
+    } else {
+      msg.textContent = "Failed: " + (res.error || "unknown error");
+      msg.style.color = "var(--danger)";
+    }
+  } catch (e) {
+    msg.textContent = "Connection error.";
+    msg.style.color = "var(--danger)";
+  } finally {
+    btn.disabled = false; btn.textContent = "Save Role";
+  }
+}
+
+async function deleteActiveRole() {
+  if (!activeRoleId) return;
+  const role = roles.find(r => r.id === activeRoleId);
+  const name = role ? role.name : activeRoleId;
+  if (!confirm(`Delete role "${name}"?\n\nCandidates already assigned keep their role label, but the questionnaire is removed.`)) return;
+  try {
+    const res = await adminApi({ action: "deleteRole", id: activeRoleId });
+    if (res.success) {
+      showToast(`Role "${name}" deleted.`, "success");
+      activeRoleId = null;
+      document.getElementById("role-editor").style.display = "none";
+      await loadRoles();
+    } else {
+      showToast("Failed to delete role.", "error");
+    }
+  } catch (e) { showToast("Connection error.", "error"); }
+}
+
+// ── Add Role modal ──────────────────────────────────────────
+function openAddRoleModal() {
+  document.getElementById("add-role-name").value = "";
+  document.getElementById("add-role-error").style.display = "none";
+  document.getElementById("add-role-modal").classList.add("open");
+  setTimeout(() => document.getElementById("add-role-name").focus(), 50);
+}
+function closeAddRoleModal() { document.getElementById("add-role-modal").classList.remove("open"); }
+document.getElementById("add-role-modal").addEventListener("click", function(e) { if (e.target === this) closeAddRoleModal(); });
+document.getElementById("add-role-modal").addEventListener("keydown", function(e) { if (e.key === "Enter" && e.target.tagName !== "BUTTON") submitAddRole(); });
+
+function showAddRoleError(msg) {
+  const el = document.getElementById("add-role-error");
+  el.textContent = msg; el.style.display = "block";
+}
+
+async function submitAddRole() {
+  const name = document.getElementById("add-role-name").value.trim();
+  document.getElementById("add-role-error").style.display = "none";
+  if (!name) { showAddRoleError("Please enter a role name."); return; }
+  const btn = document.getElementById("btn-add-role-save");
+  btn.disabled = true; btn.textContent = "Creating…";
+  try {
+    const res = await adminApi({ action: "saveRole", name, questions: [] });
+    if (!res.success) {
+      showAddRoleError(res.error === "role_exists" ? "A role with this name already exists." : (res.error || "Failed to create role."));
+      return;
+    }
+    closeAddRoleModal();
+    showToast(`Role "${name}" created.`, "success");
+    await loadRoles();
+    selectRole(res.id);   // open the new role's editor immediately
+  } catch (e) {
+    showAddRoleError("Connection error. Please try again.");
+  } finally {
+    btn.disabled = false; btn.textContent = "Create Role";
   }
 }
 
@@ -1264,6 +1571,8 @@ function openAddModal() {
   ["add-name","add-email","add-password","add-win-start","add-win-end"].forEach(id => {
     document.getElementById(id).value = "";
   });
+  populateAddRoleSelect();
+  document.getElementById("add-role").value = "";
   document.getElementById("add-error").style.display = "none";
   document.getElementById("add-modal").classList.add("open");
   setTimeout(() => document.getElementById("add-name").focus(), 50);
@@ -1281,6 +1590,8 @@ async function submitAddCandidate() {
   const name  = document.getElementById("add-name").value.trim();
   const email = document.getElementById("add-email").value.trim();
   const pass  = document.getElementById("add-password").value.trim();
+  const role  = document.getElementById("add-role").value;
+  const roleName = (roles.find(r => r.id === role) || {}).name || "";
   const ws    = document.getElementById("add-win-start").value;
   const we    = document.getElementById("add-win-end").value;
   document.getElementById("add-error").style.display = "none";
@@ -1294,6 +1605,7 @@ async function submitAddCandidate() {
   try {
     const res = await adminApi({
       action: "addCandidate", name, email, candidatePassword: pass,
+      role, roleName,
       winStart: ws ? new Date(ws).toISOString() : null,
       winEnd:   we ? new Date(we).toISOString() : null,
     });
