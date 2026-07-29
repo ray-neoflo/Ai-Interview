@@ -12,8 +12,10 @@ module.exports = async function handler(req, res) {
 
   if (!apiKey) return res.status(500).json({ error: "GROQ_API_KEY not configured" });
 
-  const { transcript } = req.body || {};
+  const { transcript, role } = req.body || {};
   if (!transcript) return res.status(400).json({ error: "transcript is required" });
+
+  const roleLabel = role && String(role).trim() ? String(role).trim() : "technical";
 
   // Truncate very long transcripts to avoid context-window failures (~6000 chars ≈ ~1500 tokens)
   const MAX_CHARS = 6000;
@@ -22,7 +24,8 @@ module.exports = async function handler(req, res) {
     : transcript;
 
   const systemPrompt =
-    'You are a senior technical interviewer evaluating an AI/MLOps Engineer candidate. ' +
+    `You are a senior technical interviewer evaluating a ${roleLabel} candidate. ` +
+    `Judge the answers against what is expected for the ${roleLabel} role. ` +
     'Score them out of 10 based on technical depth, clarity, and relevance of answers. ' +
     'Be concise. Return ONLY valid JSON — no markdown, no prose outside the JSON:\n' +
     '{"score": <integer 1-10>, "feedback": "<2-3 sentence summary>"}';

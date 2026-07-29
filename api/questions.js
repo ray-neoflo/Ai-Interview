@@ -45,7 +45,22 @@ module.exports = async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
+  const role = (req.query && req.query.role ? String(req.query.role) : "").trim();
+
   try {
+    // Role-specific questionnaire, if a role was requested and has questions.
+    if (role) {
+      const roleSnap = await db.collection("roles").doc(role).get();
+      if (roleSnap.exists) {
+        const data = roleSnap.data() || {};
+        const rq   = Array.isArray(data.questions) ? data.questions.filter(q => String(q).trim()) : [];
+        if (rq.length) {
+          return res.status(200).json({ questions: rq, roleName: data.name || role });
+        }
+      }
+    }
+
+    // Fallback: global question set, then hard-coded defaults.
     const snap = await db.collection("config").doc("questions").get();
     const list = snap.exists ? (snap.data().list || []) : [];
     return res.status(200).json({ questions: list.length ? list : DEFAULTS });

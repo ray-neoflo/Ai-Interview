@@ -610,8 +610,8 @@ async function apiCandidate(body) {
   if (!r.ok) throw new Error("Server error " + r.status);
   return r.json();
 }
-async function apiScore(transcript) {
-  const r = await fetch("/api/score", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ transcript }) });
+async function apiScore(transcript, role) {
+  const r = await fetch("/api/score", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ transcript, role: role || "" }) });
   if (!r.ok) throw new Error("Score API error " + r.status);
   return r.json();
 }
@@ -647,7 +647,7 @@ async function handleLogin() {
     S.candidate = c;
     txt.textContent = "Loading interview…";
     try {
-      const qRes = await fetch("/api/questions");
+      const qRes = await fetch("/api/questions?role=" + encodeURIComponent(c.Role || ""));
       const qData = await qRes.json();
       if (qData.questions && qData.questions.length) QUESTIONS = qData.questions;
     } catch (_) {}
@@ -954,7 +954,7 @@ async function nextQuestion() {
   S.answers[S.currentQ].a = answer;
   setAnalysing(true);
   try {
-    const r = await fetch("/api/followup", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ question: QUESTIONS[S.currentQ], answer }) });
+    const r = await fetch("/api/followup", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ question: QUESTIONS[S.currentQ], answer, role: (S.candidate && S.candidate.RoleName) || "" }) });
     const data = await r.json();
     if (data.shouldAsk && data.question) {
       S.answers[S.currentQ].followUpQ = data.question;
@@ -1011,7 +1011,7 @@ async function finishInterview() {
 
   let aiScore = "N/A", aiFeedback = "AI scoring unavailable.";
   try {
-    const data = await apiScore(fullTranscript);
+    const data = await apiScore(fullTranscript, (S.candidate && S.candidate.RoleName) || "");
     if (data.score !== undefined) { aiScore = data.score + "/10"; aiFeedback = data.feedback || ""; }
   } catch (e) { console.error(e); }
 
@@ -1042,7 +1042,7 @@ async function finishInterview() {
     }
     S.candidate = c;
     try {
-      const qRes = await fetch("/api/questions");
+      const qRes = await fetch("/api/questions?role=" + encodeURIComponent(c.Role || ""));
       const qData = await qRes.json();
       if (qData.questions && qData.questions.length) QUESTIONS = qData.questions;
     } catch (_) {}
