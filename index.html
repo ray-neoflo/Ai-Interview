@@ -730,6 +730,7 @@ function buildDots(from = 0) {
 }
 
 function loadQ(idx, isFollowUp = false, followUpText = "") {
+  S.advancing = false;
   stopSpeaking();
   clearTimeout(S.countdownTimer);
   S.currentQ = idx; S.audioChunks = []; S.hasSpeech = false;
@@ -748,6 +749,8 @@ function loadQ(idx, isFollowUp = false, followUpText = "") {
   document.getElementById("mic-error").classList.remove("show");
   document.getElementById("transcribing-msg").classList.remove("show");
   document.getElementById("analysing-msg").classList.remove("show");
+  // Next button is always available so a mic failure can never strand the candidate.
+  document.getElementById("skip-btn").classList.add("show");
 
   if (!isFollowUp) {
     document.querySelectorAll(".dot").forEach((d, i) => {
@@ -801,7 +804,7 @@ async function startSpeaking() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   } catch (e) {
-    showMicErr("Microphone access denied. Please allow microphone access in your browser and reload.");
+    showMicErr("Microphone access is blocked. Allow it in your browser and reload to record answers — or click “Next Question” to continue.");
     return;
   }
   S.stream = stream; S.recording = true; S.lastSpeech = Date.now();
@@ -925,12 +928,17 @@ function stopBrowserSTT() {
 }
 
 function nextQuestionClick() {
-  if (!S.recording || S.checkingFollowUp) return;
+  // Allow advancing regardless of mic/recording state — never block on S.recording.
+  // Only ignore while we're already processing a follow-up or mid-advance.
+  if (S.checkingFollowUp || S.advancing) return;
   nextQuestion();
 }
 
 async function nextQuestion() {
-  if (S.checkingFollowUp) return;
+  if (S.checkingFollowUp || S.advancing) return;
+  S.advancing = true;
+  // Cancel any pending "recording starts in…" countdown for the question we're leaving.
+  clearTimeout(S.countdownTimer);
   const chunks    = [...S.audioChunks];
   const mimeType  = S.mediaRecorder?.mimeType || "audio/webm";
   const hadSpeech = S.hasSpeech;

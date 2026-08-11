@@ -624,6 +624,10 @@
             <button class="btn btn-outline" onclick="openWindowModal()" title="Set interview window">
               ⏰ Set Interview Window
             </button>
+            <button class="btn btn-outline" id="btn-bulk-invite" onclick="sendInvitesBulk()"
+              title="Email login details to the selected candidates">
+              ✉ Send Invites
+            </button>
             <button class="btn btn-outline" onclick="openImportModal()">
               Import CSV / XLSX
             </button>
@@ -823,7 +827,7 @@
 <div class="modal-overlay" id="import-modal">
   <div class="modal" style="max-width:560px">
     <div class="modal-title">Import Candidates</div>
-    <div class="modal-sub">Upload a CSV or Excel file with columns: <strong>Name</strong>, <strong>Email</strong>, <strong>Password</strong>. Headers are matched case-insensitively.</div>
+    <div class="modal-sub">Upload a CSV or Excel file with columns: <strong>Name</strong>, <strong>Email</strong> (required) and <strong>Password</strong> (optional — auto-generated if blank). Headers are matched case-insensitively.</div>
 
     <div id="import-dropzone" class="import-dropzone">
       <div class="import-drop-icon">↑</div>
@@ -1012,6 +1016,9 @@ function renderCandidates(list) {
       : "—";
     const email = c.Email || c.id || "";
     const winBadge = buildWindowBadge(c.InterviewStart, c.InterviewEnd);
+    const inviteSent = c.InviteSentAt
+      ? new Date(c.InviteSentAt).toLocaleDateString("en-GB", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
+      : "";
 
     // Main row
     const tr = document.createElement("tr");
@@ -1091,7 +1098,12 @@ function renderCandidates(list) {
                   onclick="saveCandidate(${i}, '${esc(email)}')">
                   Save Changes
                 </button>
-                <span class="edit-msg" id="edit-msg-${i}"></span>
+                <button class="btn btn-outline" id="invite-btn-${i}"
+                  onclick="sendInvite('${esc(email)}', ${i})"
+                  title="Email login details to this candidate">
+                  ✉ ${inviteSent ? "Resend Invite" : "Send Invite"}
+                </button>
+                <span class="edit-msg" id="edit-msg-${i}">${inviteSent ? "Invite sent " + esc(inviteSent) : ""}</span>
                 <button class="btn-delete-cand" onclick="deleteCandidate('${esc(email)}', event)">
                   🗑 Delete
                 </button>
@@ -1635,6 +1647,71 @@ async function deleteCandidate(email, event) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  SEND INVITE EMAILS
+// ═══════════════════════════════════════════════════════════
+// Map server error codes to a friendly message.
+function inviteErrorText(err) {
+  if (err === "email_not_configured")
+    return "Email is not configured. Set AHASEND_API_KEY, AHASEND_ACCOUNT_ID and EMAIL_FROM in the environment.";
+  if (err === "not_found") return "Candidate not found.";
+  if (String(err).startsWith("send_failed_")) return "Email provider rejected the send (" + err + ").";
+  return err || "Failed to send.";
+}
+
+// Send (or resend) the invite to a single candidate.
+async function sendInvite(email, i) {
+  const btn = document.getElementById("invite-btn-" + i);
+  const msg = document.getElementById("edit-msg-" + i);
+  if (btn) { btn.disabled = true; btn.textContent = "✉ Sending…"; }
+  if (msg) { msg.textContent = ""; msg.style.color = "var(--muted)"; }
+  try {
+    const res = await adminApi({ action: "sendInvite", email, appUrl: location.origin });
+    if (res.success) {
+      showToast(`Invite sent to ${email}.`, "success");
+      await loadCandidates();
+    } else {
+      const t = inviteErrorText(res.error);
+      if (msg) { msg.textContent = t; msg.style.color = "var(--danger)"; }
+      showToast(t, "error");
+      if (btn) { btn.disabled = false; btn.textContent = "✉ Send Invite"; }
+    }
+  } catch (e) {
+    showToast("Connection error while sending invite.", "error");
+    if (btn) { btn.disabled = false; btn.textContent = "✉ Send Invite"; }
+  }
+}
+
+// Send invites to all currently selected candidates.
+async function sendInvitesBulk() {
+  const emails = Array.from(selectedEmails);
+  if (!emails.length) { showToast("Select one or more candidates first (checkboxes).", "error"); return; }
+  if (!confirm(`Send interview invite email to ${emails.length} selected candidate(s)?`)) return;
+
+  const btn = document.getElementById("btn-bulk-invite");
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = "✉ Sending…";
+
+  let sent = 0; const errs = [];
+  for (const email of emails) {
+    try {
+      const res = await adminApi({ action: "sendInvite", email, appUrl: location.origin });
+      if (res.success) sent++;
+      else errs.push(email + ": " + inviteErrorText(res.error));
+    } catch (_) { errs.push(email + ": connection error"); }
+    // If email isn't configured, stop early — every send will fail the same way.
+    if (errs.length && errs[errs.length - 1].includes("not configured")) break;
+  }
+
+  btn.disabled = false; btn.textContent = orig;
+  await loadCandidates();
+  if (errs.length) {
+    showToast(`Sent ${sent}. ${errs.length} failed — ${errs[0]}`, "error");
+    console.error("[sendInvitesBulk] failures:", errs);
+  } else {
+    showToast(`Invite sent to ${sent} candidate(s).`, "success");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  IMPORT CANDIDATES
 // ═══════════════════════════════════════════════════════════
 let importRows = [];
@@ -1695,6 +1772,23 @@ function processImportFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
+// Strong-ish random password (crypto), avoiding ambiguous characters.
+// Guarantees at least one digit and one symbol.
+function generatePassword(len = 10) {
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
+  const digits  = "23456789";
+  const symbols = "@#$%&*";
+  const all     = letters + digits + symbols;
+  const rnd     = n => {
+    const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n;
+  };
+  const out = [ digits[rnd(digits.length)], symbols[rnd(symbols.length)] ];
+  for (let i = out.length; i < len; i++) out.push(all[rnd(all.length)]);
+  // Fisher–Yates shuffle so the guaranteed chars aren't always first.
+  for (let i = out.length - 1; i > 0; i--) { const j = rnd(i + 1); [out[i], out[j]] = [out[j], out[i]]; }
+  return out.join("");
+}
+
 function parseImportRows(raw) {
   const nameKeys  = ["name", "full name", "fullname", "candidate name", "candidatename"];
   const emailKeys = ["email", "email address", "emailaddress", "e-mail"];
@@ -1715,22 +1809,27 @@ function parseImportRows(raw) {
   const emailKey = findKey(raw[0], emailKeys);
   const passKey  = findKey(raw[0], passKeys);
 
-  if (!nameKey || !emailKey || !passKey) {
+  // Only Name and Email are required. Password is optional — auto-generated when missing.
+  if (!nameKey || !emailKey) {
     const found = Object.keys(raw[0]).join(", ");
-    showToast(`Missing columns. Need: Name, Email, Password. Found: ${found}`, "error");
+    showToast(`Missing columns. Need at least: Name, Email. Found: ${found}`, "error");
     return;
   }
 
   importRows = raw
-    .map(r => ({
-      name:  String(r[nameKey]  || "").trim(),
-      email: String(r[emailKey] || "").trim().toLowerCase(),
-      pass:  String(r[passKey]  || "").trim(),
-    }))
-    .filter(r => r.name && r.email && r.pass);
+    .map(r => {
+      const provided = passKey ? String(r[passKey] || "").trim() : "";
+      return {
+        name:      String(r[nameKey]  || "").trim(),
+        email:     String(r[emailKey] || "").trim().toLowerCase(),
+        pass:      provided || generatePassword(),
+        generated: !provided,
+      };
+    })
+    .filter(r => r.name && r.email);
 
   if (!importRows.length) {
-    showToast("No valid rows found — every row must have Name, Email and Password.", "error");
+    showToast("No valid rows found — every row must have a Name and Email.", "error");
     return;
   }
 
@@ -1745,17 +1844,24 @@ function parseImportRows(raw) {
   document.getElementById("import-preview-info").textContent =
     `${total} candidate${total !== 1 ? "s" : ""} found — previewing first ${showing}`;
 
+  const autoCount = importRows.filter(r => r.generated).length;
   document.getElementById("import-preview-table").innerHTML = `
     <thead><tr><th>Name</th><th>Email</th><th>Password</th></tr></thead>
     <tbody>
       ${importRows.slice(0, showing).map(r =>
-        `<tr><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.pass)}</td></tr>`
+        `<tr><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${esc(r.pass)}${
+          r.generated ? ' <span style="color:var(--muted);font-size:11px">(auto)</span>' : ""
+        }</td></tr>`
       ).join("")}
       ${total > showing
         ? `<tr><td colspan="3" style="color:var(--muted);text-align:center;font-style:italic">… and ${total - showing} more</td></tr>`
         : ""}
     </tbody>
   `;
+  if (autoCount) {
+    document.getElementById("import-preview-info").textContent +=
+      ` · ${autoCount} password${autoCount !== 1 ? "s" : ""} auto-generated`;
+  }
 
   const runBtn = document.getElementById("btn-import-run");
   runBtn.style.display  = "inline-flex";
@@ -1768,6 +1874,7 @@ async function runImport() {
 
   const total = importRows.length;
   let created = 0, duplicates = 0, errList = [];
+  const createdRows = [];   // { name, email, pass } for a credentials export
 
   document.getElementById("import-preview").style.display  = "none";
   document.getElementById("import-progress").style.display = "block";
@@ -1786,7 +1893,7 @@ async function runImport() {
         action: "addCandidate", name: r.name,
         email: r.email, candidatePassword: r.pass,
       });
-      if (res.success)                          created++;
+      if (res.success)                          { created++; createdRows.push(r); }
       else if (res.error === "candidate_exists") duplicates++;
       else errList.push(r.email + ": " + (res.error || "unknown error"));
     } catch (_) {
@@ -1811,7 +1918,30 @@ async function runImport() {
       : "",
   ].filter(Boolean).join("<br>");
 
+  // Offer a credentials download so auto-generated passwords aren't lost.
+  if (createdRows.length) {
+    window.__lastImportCreds = createdRows;
+    resultEl.innerHTML +=
+      `<div style="margin-top:12px">
+         <button class="btn btn-outline" onclick="downloadImportCredentials()">⬇ Download credentials (CSV)</button>
+       </div>`;
+  }
+
   await loadCandidates();
+}
+
+// Export the credentials (incl. auto-generated passwords) from the last import.
+function downloadImportCredentials() {
+  const rows = window.__lastImportCreds || [];
+  if (!rows.length) return;
+  const csvEsc = v => `"${String(v).replace(/"/g, '""')}"`;
+  const lines = ["Name,Email,Password", ...rows.map(r => [r.name, r.email, r.pass].map(csvEsc).join(","))];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "candidate-credentials.csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ═══════════════════════════════════════════════════════════
