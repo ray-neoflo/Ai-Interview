@@ -51,14 +51,24 @@ function buildInviteEmail(c, appUrl) {
   const roleHtml = c.RoleName
     ? `<p style="margin:0 0 14px"><strong>Role:</strong> ${escHtml(c.RoleName)}</p>` : "";
   const linkHtml = loginUrl
-    ? `<p style="margin:22px 0"><a href="${escHtml(loginUrl)}" style="background:#000;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Start your interview →</a></p>
-       <p style="margin:0 0 14px;font-size:13px;color:#666">Or paste this link into your browser:<br>${escHtml(loginUrl)}</p>`
+    ? `<p style="margin:22px 0"><a href="${escHtml(loginUrl)}" style="background:#000;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Start your interview →</a></p>`
     : "";
+
+  // Logo is hosted (served at /favicon.png) — email clients block data: URIs,
+  // so we reference an absolute URL and only when we know the base.
+  const logoImg = base
+    ? `<img src="${escHtml(base)}/favicon.png" alt="Neoflo" width="40" height="40" style="display:inline-block;vertical-align:middle;border:0;border-radius:9px">`
+    : "";
+  const headerHtml =
+    `<div style="text-align:center;padding:0 0 18px;margin:0 0 24px;border-bottom:1px solid #ededed">
+       ${logoImg}<span style="font-size:20px;font-weight:700;color:#111;vertical-align:middle;margin-left:${base ? "10px" : "0"};letter-spacing:-0.2px">Neoflo</span>
+     </div>`;
 
   const html = `
   <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111;line-height:1.55">
+    ${headerHtml}
     <p style="margin:0 0 14px">Hi ${escHtml(name)},</p>
-    <p style="margin:0 0 14px">You've been invited to complete your interview with <strong>Neoflo</strong>. Use the credentials below to sign in.</p>
+    <p style="margin:0 0 14px">Thank you for taking the time to interview with us. You've been invited to complete your interview with <strong>Neoflo</strong> — use the credentials below to sign in.</p>
     ${roleHtml}
     ${winHtml}
     <div style="background:#f5f5f7;border-radius:10px;padding:14px 16px;margin:0 0 14px">
@@ -76,8 +86,9 @@ function buildInviteEmail(c, appUrl) {
   </div>`;
 
   const textLines = [
+    "Neoflo", "",
     `Hi ${name},`, "",
-    "You've been invited to complete your interview with Neoflo. Sign in with the credentials below.", "",
+    "Thank you for taking the time to interview with us. You've been invited to complete your interview with Neoflo. Sign in with the credentials below.", "",
     c.RoleName ? `Role: ${c.RoleName}` : "",
     start ? `Interview opens: ${start}` : "",
     end   ? `Interview closes: ${end}` : "",
